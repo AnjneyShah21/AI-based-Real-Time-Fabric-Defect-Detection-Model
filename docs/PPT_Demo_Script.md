@@ -7,7 +7,7 @@ Use this template to create your final presentation slides. It is structured per
 ## Slide 1: Title Screen
 **Title:** LoomVision AI: Real-Time Fabric Defect Detection using Computer Vision
 **Subtitle:** Automating Quality Assurance in Textile Manufacturing
-**Developer:** Raunak Raj
+**Developer:** Anjney Rohit Shah
 **Guide/Mentor:** Dr. Prapulla S B
 
 ## Slide 2: Problem Statement
