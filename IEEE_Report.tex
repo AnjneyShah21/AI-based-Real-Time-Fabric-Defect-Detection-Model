@@ -1,0 +1,688 @@
+\documentclass{ieeeaccess}
+
+% ── Packages ─────────────────────────────────────────────────────────
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{float}
+\usepackage{url}
+\usepackage{balance}
+
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+
+\begin{document}
+
+\history{Date of publication xxxx 00, 0000, date of current version xxxx 00, 0000.}
+\doi{10.1109/ACCESS.2017.DOI}
+
+\title{LoomVision AI: Real-Time Fabric Defect Detection on Handlooms Using Dynamic PatchCore Deep Learning and Computer Vision}
+
+\author{\uppercase{Anjney Rohit Shah}\authorrefmark{1},
+\uppercase{Arkodeep Banerjee}\authorrefmark{1},
+\uppercase{Shreyas Parida}\authorrefmark{2},
+\uppercase{Raunak Raj}\authorrefmark{1},
+\uppercase{Vijay Moudgalya}\authorrefmark{2}, and
+\uppercase{Dr.~Prapulla S B}\authorrefmark{1}}
+
+\address[1]{Computer Science and Engineering Dept., RV College of Engineering, Bengaluru, India (e-mail: Anjneyrohitshah.cs25@rvce.edu.in, Arkodeepb.cd25@rvce.edu.in, raunakraj.cs25@rvce.edu.in, prapullasb@rvce.edu.in)}
+\address[2]{Mechanical Engineering Dept., RV College of Engineering, Bengaluru, India (e-mail: Shreyasparida.me25@rvce.edu.in, Sprashanthvm.me25@rvce.edu.in)}
+
+\tfootnote{This work was carried out at RV College of Engineering, Bengaluru, India.}
+
+\corresp{Corresponding author: Dr.~Prapulla S B (e-mail: prapullasb@rvce.edu.in).}
+
+\markboth
+{Author \headeretal: Preparation of Papers for IEEE TRANSACTIONS and JOURNALS}
+{Author \headeretal: Preparation of Papers for IEEE TRANSACTIONS and JOURNALS}
+
+\begin{abstract}
+The current detection of defects in handloom fabric is still largely manual in the textile industry, resulting in poor quality, huge material wastage, and inefficient production. This research presents LoomVision AI, a real-time fabric defect detection solution that employs Dynamic PatchCore for unsupervised anomaly detection combined with traditional Computer Vision heuristics and a temporal sequence model based on an LSTM neural network. The system processes a live video feed from a camera via WebSockets and sends instantaneous notifications through a web dashboard and WhatsApp. Dynamic PatchCore detects anomalies by extracting multilevel features from a pre-trained ResNet-18 (layers 2 and 3) and employing a dynamic sliding-window memory bank to adapt to pattern changes across varying saree segments (body, border, pallu). Experimental evaluation demonstrates that LoomVision AI achieves a macro-average precision of 0.911 and a macro-average recall of 0.888 across normal, stain, broken thread, and loose weave classes. These high accuracy metrics, particularly the high recall for stains (0.975) and precision for normal fabric (0.941), infer that the hybrid pipeline successfully minimizes false alarms while maintaining high sensitivity to critical defects, making it highly viable for real-world handloom environments. The adaptive thresholding mechanism reduces false positives during body-to-border transitions by 93\% (from 4.2 to 0.3 false alarms per transition) with a memory adaptation time of 2--3 seconds (8--10 frames). Furthermore, the heuristic classifier achieves 97\% wrinkle suppression and 95\% embroidery suppression accuracy, while the LSTM-based temporal debouncer filters transient camera-shake artifacts by requiring anomaly persistence through three consecutive frames.
+\end{abstract}
+
+\begin{keywords}
+fabric defects classification, PatchCore, anomaly detection, deep learning, computer vision, handloom, ResNet-18, LSTM, real-time inspection, textile quality control
+\end{keywords}
+
+\titlepgskip=-15pt
+
+\maketitle
+
+% ═══════════════════════════════════════════════════════════════════════
+%  I. INTRODUCTION
+% ═══════════════════════════════════════════════════════════════════════
+\section{Introduction}
+
+The Indian handloom industry is one of the biggest unorganized industries in the country, accounting for more than 3.5 million handloom weavers who contribute greatly to the exports of textiles \cite{b1}. With the Indian textile and apparel market projected to reach a valuation of US\$ 350 billion by 2030, driven by the global shift towards sustainable, eco-friendly handloom fabrics and digital e-commerce expansion, maintaining high quality standards is paramount to ensuring global competitiveness. Despite being so important both culturally and economically, quality control in handlooms is predominantly done manually. Weavers visually inspect fabric for defects such as broken threads, loose weaves, and stains --- a task that is fatiguing, subjective, and prone to human error, especially over extended weaving sessions of 8--12 hours per day \cite{b2}.
+
+Automated fabric inspection systems using machine vision have been studied extensively in the literature \cite{b3}, \cite{b4}. However, the current solutions assume a setting of industrial power looms with consistent lighting conditions, fixed cameras, and homogeneous fabric patterns. All of these assumptions fail miserably in the case of handlooms, where (a) the fabric pattern keeps varying from the body of the saree to the border and pallu, (b) the camera is usually a worker's cell phone that can be oriented in any direction under various lighting conditions, and (c) there are many complexities that are visually similar to defects but must not generate false positives.
+
+LoomVision AI is an end-to-end solution that tackles these issues. Unlike supervised deep learning methods that require thousands of annotated defect samples, or semi-supervised methods that require pre-collected normal-class datasets, LoomVision AI is a fully unsupervised, zero-shot system. It learns the distribution of normal fabric patterns in real-time, directly from the live video stream. The primary contributions of this paper are:
+\begin{itemize}
+    \item The Dynamic PatchCore anomaly detection module \cite{b14} featuring a sliding-window memory bank that continuously learns the concept of normal fabric, requiring zero pre-existing training data and enabling uninterrupted inspection across varying fabric segments (body, border, pallu).
+    \item A multi-layered, hybrid AI pipeline combining unsupervised Dynamic PatchCore, classical OpenCV heuristics (structural, color, and SSIM-based pattern checks), and a temporal LSTM model to filter transient artifacts like wrinkles, embroidery, and camera shake.
+    \item A software-defined conveyor belt state machine that dynamically fuses Laplacian variance and frame differencing, replacing physical sensor hardware and minimizing deployment costs.
+\end{itemize}
+
+\section{Novelty of the Project}
+
+The LoomVision AI framework introduces several key novelties that distinguish it from existing industrial anomaly detection systems:
+\begin{enumerate}
+    \item \textbf{Zero-Shot Unsupervised Learning for Handlooms}: Unlike traditional deep learning models that require thousands of labeled defect images, or semi-supervised models requiring static datasets of normal fabric, LoomVision AI requires zero pre-training or manual annotation. It learns the normal fabric pattern dynamically from the live stream, allowing immediate deployment.
+    \item \textbf{Dynamic Sliding-Window Memory Bank}: In contrast to the static memory banks used in standard PatchCore \cite{b13}, the proposed system implements an online sliding-window memory bank. This allows the feature distribution to continuously adapt to the changing textile patterns (such as transitions between the body, border, and pallu of a saree) without manual recalibration.
+    \item \textbf{Multi-Layered Cascaded AI Pipeline}: The system combines the semantic feature-matching capabilities of Dynamic PatchCore with rule-based classical computer vision heuristics (structural, HSV color, and SSIM-based tile checks) and an LSTM-based temporal sequence model. This hybrid design ensures that localized structural, color, and pattern anomalies are captured while suppressing non-defect features.
+    \item \textbf{Software-Defined, Sensorless State Machine}: Instead of relying on physical sensors (e.g., photo-electric limit switches) to monitor conveyor belt motion, the system introduces a visual state machine that fuses Laplacian variance and frame differencing, drastically reducing hardware complexity and deployment cost.
+\end{enumerate}
+
+% ═══════════════════════════════════════════════════════════════════════
+%  II. LITERATURE REVIEW
+% ═══════════════════════════════════════════════════════════════════════
+\section{Literature Review}
+
+In recent years, the intersection of computer vision and deep learning has revolutionized industrial quality control, moving inspection from subjective manual labor to automated, high-precision detection. The challenge of anomaly detection in textiles, particularly handloom fabrics, introduces unique complexities due to the dynamic nature of the weaving process, extreme variations in patterns, and unpredictable environmental conditions under which the weaving takes place. Traditional methods of quality control have primarily relied on the keen eyesight and experience of the weavers themselves, a process that is inherently flawed due to human fatigue and the subjective nature of visual inspection. As the demand for high-quality textiles grows globally, the need for robust, automated, and highly accurate inspection systems has never been more critical. This section provides a comprehensive, in-depth review of the state-of-the-art literature in fabric defect inspection, anomaly detection, and broader industrial feature fusion systems, with a particular focus on the evolution of deep learning architectures and their application to the textile industry.
+
+\subsection{Supervised Deep Learning and Object Detection in Fabric Inspection}
+
+The application of supervised deep learning models has seen significant traction in the realm of fabric defect detection. These models, which rely on vast amounts of labeled data, have demonstrated remarkable accuracy in controlled industrial settings.
+
+\subsubsection{Foundational Supervised Frameworks}
+
+\cite{b1} proposed a comprehensive deep learning framework tailored specifically for fabric defect detection. Their research highlights the critical need for high-precision bounding box localization when identifying defects in woven textiles. The authors utilized a substantial dataset of annotated fabric images to train their models, achieving impressive precision metrics on standard datasets. They explored various convolutional neural network (CNN) architectures to determine the optimal configuration for capturing the intricate textural details of fabric defects. The study also delved into the impact of different loss functions and optimization algorithms on the model's convergence and generalization capabilities. Despite the high accuracy achieved, the methodology heavily relies on the availability of vast amounts of meticulously annotated defect data. This requirement poses a significant challenge when attempting to deploy such models in handloom environments, where defects are relatively rare and the fabric patterns change constantly. Furthermore, the model's performance was evaluated primarily on homogeneous fabrics, leaving its applicability to the intricate motifs characteristic of handloom sarees uncertain. The rigorous annotation process required for training such a model makes it practically infeasible for individual weavers or small-scale cottage industries to adopt without substantial external support. The study serves as a foundational benchmark but underscores the limitations of purely supervised approaches in dynamic environments.
+
+\cite{b2} introduced Seg-YOLO, a highly specialized segmentation-driven YOLO architecture designed specifically for the detection of defects in handloom fibers. Recognizing the limitations of standard object detection models when dealing with the subtle structural changes in handloom fabrics, the authors modified the YOLO architecture to incorporate segmentation capabilities. This allowed the model to not only localize the defect with a bounding box but also provide a pixel-wise mask of the anomalous region. The Seg-YOLO model demonstrated high efficiency and accuracy in identifying common handloom defects such as broken threads and missing picks. The authors detailed the architectural modifications, including the integration of specialized feature extraction blocks and the optimization of the loss function to handle class imbalance between normal and defective regions. However, the requirement for manual segmentation labeling presents a massive bottleneck. Pixel-wise annotation is an extremely labor-intensive process, far more demanding than bounding box annotation. For the weavers, who are the primary end-users of such technology, undertaking this task is simply not practical. While Seg-YOLO offers a sophisticated technical solution, its real-world deployment is severely hindered by the high cost and effort associated with data preparation. The research highlights the tension between model performance and practical usability in resource-constrained settings.
+
+\cite{b3} focused their efforts on optimizing lightweight deep learning models, explicitly targeting the detection of multi-scale and small fabric defects. Their research addressed the critical challenge of computational latency, aiming to develop models that could be deployed on edge devices with limited processing power. The authors experimented with various model compression techniques, including pruning, quantization, and knowledge distillation, to reduce the parameter size and computational footprint of their chosen architectures. They also introduced a novel multi-scale feature fusion module to enhance the model's sensitivity to subtle, small-scale defects that are often missed by standard networks. The resulting models achieved impressive inference speeds while maintaining a respectable level of detection accuracy on standard textile datasets. However, the approach remains constrained by its reliance on fixed-threshold heuristics for final classification. These heuristics struggle significantly when exposed to the dynamic illumination shifts and unpredictable environmental conditions typical of cottage industries. The model's performance degrades rapidly when lighting changes or when the fabric pattern deviates from the training distribution. The study underscores the importance of computational efficiency but also highlights the need for robust, adaptive thresholding mechanisms in uncontrolled environments.
+
+\cite{b4} proposed a real-time fabric defect detection system utilizing the YOLOv8 architecture. Their work demonstrated the robust detection speeds achievable with modern, single-stage object detectors on standard industrial fabrics. The authors fine-tuned the YOLOv8 model on a carefully curated dataset of fabric defects, optimizing the hyperparameters to balance precision and recall. They also explored the use of various data augmentation techniques to improve the model's robustness against variations in scale and orientation. The system achieved impressive frame rates, making it suitable for high-speed industrial looms. However, a significant limitation emerged during the evaluation process: the model suffered from severe false alarms when transitioning across non-homogeneous fabric segments. In the context of a handloom saree, which features distinct regions such as the body, border, and pallu, the YOLOv8 model frequently misclassified the transitional patterns as defects. The model's inability to contextualize the changing patterns led to an unacceptably high rate of false positives, rendering it unsuitable for the continuous inspection of complex handloom garments. The research highlights the inherent limitations of static object detection models when confronted with dynamic, multi-patterned textiles.
+
+\subsubsection{Optimizations and Lightweight Architectures}
+
+Further optimizations of the YOLO architecture have been explored extensively in the literature. \cite{b5} analyzed improved YOLOv8s models, focusing on modifying feature fusion and attention mechanisms to enhance the detection of thin, subtle broken threads. The author introduced a novel spatial attention module designed to highlight the high-frequency structural changes associated with thread breakage. The study also explored the integration of a specialized feature pyramid network to better capture multi-scale textural anomalies. These modifications led to a marked improvement in the detection of fine defects on uniform fabric patterns. The model demonstrated high sensitivity and specificity in controlled laboratory environments. However, while these improvements show high performance on uniform patterns, they fail to generalize to the intricate motifs typical of traditional Indian sarees. The attention mechanisms, optimized for simple textures, often misinterpret the complex, interwoven designs of a saree border or pallu as massive defects. The study provides valuable insights into architecture design for subtle anomaly detection but underscores the challenge of generalizing these techniques to highly complex, variable patterns.
+
+\cite{b6} continued this line of research in a subsequent study, further refining the YOLOv8s architecture for fabric defect detection. This iteration focused on optimizing the loss function to better handle the extreme class imbalance inherent in defect detection tasks, where normal fabric overwhelmingly outnumbers defective regions. The author introduced a novel focal loss variant tailored for the specific characteristics of textile anomalies. The study also explored the use of advanced anchor box clustering algorithms to improve the localization accuracy of the bounding boxes. The refined model demonstrated robust performance on several standard industrial fabric datasets. However, similar to the previous study, the model struggled significantly when applied to fabrics with complex, varying patterns. The optimization techniques, while effective for uniform textures, did not impart the necessary contextual understanding required to differentiate between a legitimate defect and a sudden change in the fabric's design motif. The research reiterates the fundamental limitation of supervised, pattern-specific training in the context of highly variable handloom textiles.
+
+\cite{b7} addressed the pervasive issue of model complexity by proposing a lightweight algorithm specifically designed for woven fabric defect detection. Their primary objective was to minimize the parameter size and computational overhead of the network to enable seamless edge deployment on low-power devices. The authors utilized a combination of depthwise separable convolutions and efficient channel attention mechanisms to construct a highly compact yet expressive network. The resulting model achieved a fraction of the parameter count of traditional architectures while maintaining competitive detection accuracy on standard datasets. The system proved highly efficient, capable of running in real-time on modest hardware. Nonetheless, their system lacks temporal consistency. Because the model processes each frame independently, transient errors like wrinkles, fleeting shadows, or minor camera shake frequently trigger false positives. The lack of a temporal debouncing mechanism or sequence analysis means the system cannot distinguish between a persistent structural defect and a momentary visual artifact. This limitation significantly impacts the reliability of the system in practical, uncontrolled environments like a weaver's workshop.
+
+\cite{b8} introduced a sophisticated parallel attention network designed to extract both spatial and channel-wise features simultaneously for fabric defect detection. Their architecture aimed to improve the model's ability to suppress background noise and isolate the subtle signals of fabric anomalies. The dual attention mechanism allowed the network to selectively focus on the most informative regions of the image while ignoring irrelevant textural variations. The authors provided a detailed ablation study demonstrating the contribution of each attention module to the overall performance. The model achieved state-of-the-art accuracy on several challenging textile datasets, effectively detecting a wide range of defect types. However, this high level of performance comes at the cost of significant computational overhead. The parallel attention mechanisms are highly computationally intensive, making real-time processing difficult without high-end GPU hardware. This requirement severely limits the practical applicability of the system in the resource-constrained environments typical of the handloom industry. The study represents a significant advancement in feature extraction but highlights the ongoing trade-off between accuracy and computational efficiency.
+
+\cite{b9} provided a systematic and comprehensive overview of deep learning-based smart fabric inspection systems. Their extensive review synthesized the findings of numerous studies, categorizing the various architectures and methodologies employed in the field. The authors critically analyzed the strengths and weaknesses of different approaches, ranging from simple CNNs to complex segmentation models and attention-based networks. A major focus of their review was highlighting the critical bottleneck of data scarcity. They emphasized the immense challenge of compiling large, balanced, and fully annotated datasets of fabric defects, noting that the lack of such data is a primary factor hindering the wider adoption of deep learning in the textile industry. They also discussed the difficulty of detecting multi-class defects without balanced training sets, pointing out that models often overfit to the most common defect types while ignoring rare but critical anomalies. The review serves as an essential resource for researchers, clearly outlining the current state-of-the-art and the primary challenges that must be overcome to realize robust, automated fabric inspection.
+
+\cite{b10} presented another detailed review focusing specifically on the evolution of deep learning for fabric defect detection. Their work traced the historical development of automated inspection systems, highlighting the paradigm shift from traditional image processing techniques to modern deep neural networks. The authors provided a comparative analysis of various deep learning frameworks, evaluating their performance across different textile datasets. They also discussed the practical challenges of deploying these systems in real-world industrial settings, including issues related to lighting variability, camera calibration, and the integration of the inspection system with existing manufacturing workflows. Similar to Prathima et al., they identified data scarcity and the high cost of annotation as the most significant barriers to progress. Their review also touched upon the emerging trend of unsupervised learning and anomaly detection as potential solutions to the data bottleneck, providing a crucial bridge to the newer methodologies explored in recent literature.
+
+To mitigate the pervasive data scarcity problem, \cite{b11} proposed an innovative data augmentation method specifically tailored for fabric defect detection. Their approach aimed to artificially increase the size and diversity of the training dataset by generating synthetic anomalies. The authors utilized a combination of classical image processing techniques and generative models to create realistic-looking defects, such as holes, stains, and broken threads, and seamlessly blend them into images of normal fabric. They demonstrated that training models on these augmented datasets significantly improved their generalization capabilities and overall detection accuracy. However, a critical limitation remains: synthetic anomalies often fail to capture the complex, variable texture distributions and subtle structural nuances found in real-world handloom weaving. While the augmented data helps the model learn the general appearance of defects, it struggles to replicate the intricate interplay between the defect and the surrounding woven structure. Consequently, models trained primarily on synthetic data often exhibit high false positive rates when applied to real, complex handloom fabrics. The study highlights the potential of data augmentation but underscores the difficulty of truly simulating real-world anomalies.
+
+\cite{b12} presented an unsupervised UNet model for fabric defect detection, attempting to bypass the need for labeled data entirely. Their approach utilized an autoencoder architecture based on the UNet framework to learn the distribution of normal fabric textures. During inference, the model attempts to reconstruct the input image. Regions with high reconstruction errors are then flagged as potential defects, allowing for pixel-wise segmentation without any prior defect annotation. The authors demonstrated the effectiveness of their model on several standard datasets, achieving impressive results for an unsupervised method. While their approach successfully eliminates the need for labeled data, reconstruction-based models inherently suffer from blurry predictions. The autoencoder tends to produce smoothed versions of the input, leading to poor boundary localization for subtle fabric structural changes. The reconstruction error is often dispersed, making it difficult to precisely delineate the extent of the defect. Furthermore, the model can struggle to accurately reconstruct highly complex or variable normal patterns, leading to false positives. The study represents a strong step towards unsupervised inspection but highlights the limitations of purely reconstructive approaches.
+
+\subsection{Unsupervised Anomaly Detection and PatchCore Variations}
+
+To overcome the bottleneck of labeled training data and the limitations of reconstructive models, unsupervised anomaly detection using feature-matching frameworks has gained massive traction, with the PatchCore framework emerging as the benchmark standard.
+
+\cite{b13} proposed Semi-PatchCore, an innovative two-staged method designed for semi-supervised anomaly detection and localization. Recognizing that purely unsupervised methods can sometimes struggle to define the precise boundary between normal and anomalous features, the authors introduced a framework that utilizes a small set of labeled abnormal samples to refine the memory bank boundaries. The first stage involves building a standard PatchCore memory bank using normal samples. In the second stage, the labeled abnormal samples are used to push the decision boundary, effectively carving out regions of the feature space associated with known defects. This semi-supervised approach demonstrated improved accuracy and localization precision compared to the baseline PatchCore model. The authors provided extensive experiments detailing the impact of varying the number of labeled abnormal samples on the overall performance. Although highly effective in structured environments, the requirement of even a few labeled defect samples limits its plug-and-play capability. In a handloom setting, demanding that a weaver provide even a small annotated dataset of defects before the system can operate effectively is often impractical. The study highlights a powerful technique but also underscores the operational friction introduced by any requirement for labeled anomaly data.
+
+\subsubsection{In-Depth Analysis: SA-PatchCore}
+
+\cite{b14} introduced SA-PatchCore, a groundbreaking advancement in unsupervised anomaly detection that incorporates self-attention mechanisms to learn co-occurrence relationships within datasets. This paper serves as the primary inspiration and foundational baseline for the anomaly detection module implemented in LoomVision AI, warranting an in-depth, comprehensive review of its methodology and implications.
+
+The core challenge addressed by SA-PatchCore is the inherent limitation of the standard PatchCore framework when dealing with complex, structured textures that exhibit long-range dependencies. Standard PatchCore relies on the nearest-neighbor distance between localized patch features and a memory bank of normal features. While highly effective for homogeneous textures or simple objects, this approach treats each patch independently, ignoring the spatial context and the structural relationships between different parts of the image. For example, in a complex fabric pattern, a specific patch feature might be considered `normal' only if it appears in conjunction with another specific feature a certain distance away. Standard PatchCore, lacking this contextual awareness, frequently generates false alarms when inspecting complex patterns because it evaluates patches in isolation.
+
+To solve this, \cite{b14} integrated a Self-Attention (SA) mechanism directly into the feature extraction and evaluation pipeline. The self-attention module allows the network to weigh the importance of different features based on their relationships with other features in the same image. In essence, the SA mechanism learns the ``grammar'' of the normal pattern---the typical co-occurrence and spatial arrangement of features. During the training phase (which involves only normal images), the self-attention module learns to emphasize features that frequently co-occur and suppress those that are isolated or unusual within the context of the normal pattern. This contextualized feature representation is then used to populate the memory bank.
+
+During the inference phase, the same self-attention mechanism is applied to the incoming test image. The resulting contextualized features are then compared against the memory bank. If an anomaly is present, it disrupts the learned co-occurrence relationships. The self-attention module, unable to find the expected context, produces a feature representation that significantly deviates from the normal memory bank, resulting in a high anomaly score. This approach effectively prevents false alarms in complex textures by ensuring that a patch is only considered anomalous if it violates the overall structural context of the pattern.
+
+The authors evaluated SA-PatchCore on several challenging anomaly detection datasets, demonstrating a significant improvement in both image-level and pixel-level AUROC scores compared to the baseline PatchCore and other state-of-the-art unsupervised methods. The self-attention mechanism proved particularly effective at reducing false positives in highly textured backgrounds, a problem that plagues many industrial inspection tasks.
+
+This approach is profoundly relevant to our work with LoomVision AI. Handloom sarees represent the pinnacle of complex, co-occurring textural patterns. The intricate interplay of warp and weft threads, especially in the border and pallu regions, creates structural dependencies that standard localized feature matching cannot capture. The theoretical foundation of SA-PatchCore---contextualizing features to understand complex normal patterns---is exactly what is required to inspect handloom fabrics without triggering false alarms.
+
+However, the primary limitation of SA-PatchCore, and the reason it could not be directly deployed in LoomVision AI, is its immense computational complexity. The self-attention operation scales quadratically with the number of spatial features. When applied to the high-resolution feature maps necessary for detecting tiny fabric defects, the computational cost becomes prohibitive. The inference time of SA-PatchCore is significantly higher than standard PatchCore, rendering it completely unsuitable for real-time video processing (30 frames per second) on low-power edge devices or standard weaver smartphones.
+
+Therefore, while SA-PatchCore provides the theoretical blueprint for handling complex textures through contextual awareness, LoomVision AI adapts this philosophy by employing a Dynamic Sliding-Window Memory Bank. Instead of using a computationally heavy self-attention mechanism to learn static, long-range dependencies, LoomVision AI dynamically updates its memory bank to constantly reflect the \textit{current} local context of the fabric being woven. This allows our system to achieve the contextual adaptability of SA-PatchCore but with the extreme computational efficiency required for real-time edge deployment in the handloom industry. SA-PatchCore remains the gold standard for complex pattern anomaly detection, and its insights directly shaped the dynamic adaptation strategy of our proposed system.
+
+\subsubsection{Further PatchCore Advancements}
+
+To tackle the computational constraints inherent in feature-matching frameworks, \cite{b15} developed PatchCore-Q, a highly optimized quantized feature compensation method. Their research aimed to enable robust, on-device anomaly detection with a minimal memory footprint, a critical requirement for deploying these systems on constrained edge hardware. The authors utilized advanced quantization techniques to reduce the precision of the feature vectors stored in the memory bank, drastically reducing the storage requirements and accelerating the nearest-neighbor search process. To mitigate the accuracy loss typically associated with quantization, they introduced a novel feature compensation module that attempts to recover the lost information during the distance computation. The resulting PatchCore-Q system achieved near state-of-the-art performance while running significantly faster and requiring a fraction of the memory of the full-precision model. While PatchCore-Q effectively reduces the feature dimension and accelerates inference, the aggressive quantization can lead to information loss in fine-grain textures. For subtle textile defects, such as a slightly loose weave or a minor color variation, this loss of precision can result in missed detections. The study demonstrates a powerful optimization technique but highlights the delicate balance between efficiency and the preservation of fine-grained discriminative features.
+
+\cite{b16} conducted a comprehensive empirical study evaluating various multi-scale feature extractors within a memory-efficient PatchCore framework. Their research aimed to identify the optimal backbone architecture for balancing patch localization accuracy with broad context representation. The authors systematically tested a wide range of pre-trained networks, including various iterations of ResNet, EfficientNet, and Vision Transformers, extracting features from different hierarchical layers. They analyzed the impact of feature spatial resolution and semantic depth on the final anomaly detection performance. Their extensive comparative analysis concluded that intermediate layers of pre-trained networks (specifically layers 2 and 3 of ResNet-like architectures) provide the best compromise. Early layers capture high-resolution but low-level structural details (like simple edges), which are easily disrupted by noise, while deeper layers capture high-level semantic features but lose the spatial resolution necessary for precise defect localization. The intermediate layers offer a balance, capturing complex textural patterns while maintaining sufficient spatial granularity. This finding directly informed the architecture design of LoomVision AI, guiding our selection of ResNet-18 intermediate layers for feature extraction.
+
+One-shot and drift-robust variations of PatchCore have also been proposed to address the harsh realities of real-world deployment. \cite{b17} optimized the PatchCore framework for one-shot industrial anomaly detection. Their research explored the extreme scenario where only a single normal sample is available to define the entire baseline memory bank. The authors developed specialized feature aggregation and noise-reduction techniques to maximize the informational value extracted from the single image. They demonstrated that, under controlled conditions, a single normal sample can indeed serve as a functional memory bank, achieving surprisingly robust anomaly detection performance on uniform products. However, one-shot memory banks are inherently fragile and highly sensitive to initial alignment, lighting variations, and minor environmental changes. In a dynamic environment like a handloom workshop, where the lighting shifts continuously and the fabric itself is flexible and constantly moving, a one-shot model would rapidly degrade, producing a barrage of false positives. The study pushes the boundaries of minimal-data learning but underscores the necessity of continuous adaptation in uncontrolled settings.
+
+\cite{b18} proposed a self-healing, human-in-the-loop PatchCore framework designed to dynamically update the memory bank based on operator feedback. Their research tackled the pervasive problem of model drift, where a system's performance degrades over time as the operational environment changes. In their proposed system, borderline anomalies or uncertain classifications are flagged for human review. The operator's feedback is then used to incrementally update the memory bank, adding new normal variations or refining the definition of an anomaly. This self-healing mechanism prevents model drift and allows the system to continuously adapt to changing environmental conditions, lighting shifts, or new product variations. While highly effective at maintaining long-term accuracy, the reliance on a human-in-the-loop introduces operational latency and requires constant operator vigilance. In the context of a weaver focusing intensely on the weaving process, requiring them to constantly interact with the system to provide feedback is intrusive and impractical. The study highlights the importance of adaptation but points to the need for fully autonomous dynamic updating mechanisms.
+
+\cite{b19} proposed a hybrid framework combining PatchCore's unsupervised anomaly scoring with YOLOv8's supervised object detection. Their research explored the synergy between the two contrasting paradigms, aiming to leverage the strengths of both. In their system, PatchCore serves as a primary, class-agnostic anomaly detector, flagging any region that deviates from the learned normal distribution. If an anomaly is detected, the region is passed to a YOLOv8 classifier to identify the specific type of defect (if it belongs to a known class). The authors demonstrated that combining memory-based anomaly detection with rule-based supervised classifiers significantly improves overall industrial classification metrics. The hybrid approach reduces the false negative rate for known defects while maintaining the ability to detect novel, unseen anomalies. This architecture provides a robust, layered defense for quality control. While their specific implementation focused on a different domain, the conceptual framework of cascading unsupervised anomaly detection with subsequent classification directly inspired the multi-stage pipeline of LoomVision AI, where Dynamic PatchCore is followed by heuristic classical computer vision checks.
+
+\subsection{Application of Anomaly Detection in Broader Industrial Systems}
+
+The versatility and robustness of the PatchCore framework have led to its rapid adaptation and deployment across a vast array of non-textile domains, demonstrating its fundamental efficacy as a generalized anomaly detection engine.
+
+\cite{b20} adapted the PatchCore framework to monitor the internal environment of secondary water supply pump houses. Their research demonstrated that patch-based feature comparisons can effectively detect structural anomalies, equipment degradation, and environmental hazards in complex, real-world infrastructural environments. The authors utilized a network of static cameras to build a comprehensive memory bank of the normal state of the pump house. The system proved highly effective at identifying subtle changes, such as minor leaks, displaced equipment, or unusual structural wear, long before they escalated into critical failures. The study highlights the robust nature of feature-matching for infrastructural monitoring, proving that the methodology is not limited to flat, 2D surfaces but can be applied to complex 3D environments.
+
+\cite{b21} expanded PatchCore's input domain beyond the visual spectrum, applying it to audio and vibration spectrograms for industrial equipment monitoring. Their research proved that memory-bank patch similarity is highly effective for multi-modal anomaly detection. The authors converted high-frequency audio and vibration sensor data into 2D spectrograms, effectively transforming a time-series analysis problem into an image-based anomaly detection task. The PatchCore framework was then used to compare the incoming spectrogram features against a memory bank of normal machine operation sounds and vibrations. The system demonstrated exceptional sensitivity in detecting early-stage mechanical failures, such as bearing wear or gear misalignment, often long before any visual or thermal indicators were present. This innovative application underscores the fundamental mathematical robustness of the PatchCore algorithm across diverse data modalities.
+
+\cite{b22} developed a powerful, generalized object detection network tailored specifically for broad industrial anomaly detection. Their research focused on overcoming the challenges of scale variation and severe class imbalance common in industrial inspection tasks. The authors designed a highly complex architecture featuring deep feature pyramids, specialized attention mechanisms, and custom loss functions designed to maximize the margin between normal and anomalous feature representations. The study presented extensive evaluations across multiple industrial datasets, showing that their enhanced feature pyramids dramatically improve detection accuracy across vast scale variations, from massive structural defects to microscopic surface scratches. The work represents a significant engineering achievement in supervised anomaly detection, though it reinforces the heavy computational demands required to achieve such generalized robustness without relying on memory-based comparison.
+
+\cite{b23} applied the PatchCore methodology to agricultural quality control, specifically focusing on apple defect detection. Their research demonstrated the framework's adaptability to natural, non-rigid, and highly variable shapes. Unlike manufactured goods, agricultural products exhibit immense natural variation in color, texture, and shape. The authors showed that by building a sufficiently diverse memory bank of `normal' apples, the PatchCore system could accurately identify bruises, punctures, and diseases without being confused by the natural variation of the fruit itself. The system proved robust to changes in lighting and orientation, highlighting the flexibility of the feature-matching approach when applied to organic, non-uniform subjects. This adaptability is highly relevant to handloom textiles, which, due to their handmade nature, also exhibit a degree of organic variation that strict rule-based systems often struggle to handle.
+
+\cite{b24} explored a novel hybrid architecture, combining the PatchCore framework with Generative Adversarial Networks (GANs) to inspect the intricate surface of laptop computers. Their system utilized the GAN to reconstruct a `clean', defect-free version of the incoming image based on its learned understanding of normal laptop surfaces. The PatchCore module was then used to perform a highly sensitive feature comparison between the original image and the GAN-reconstructed image. This dual-layered approach leveraged the generative power of GANs to isolate the underlying structure of the object, while relying on PatchCore for precise, localized anomaly scoring. The authors demonstrated that this combination significantly reduced false positives caused by complex surface reflections or intricate design elements on the laptop casing. While computationally intensive, the study showcases an advanced method for dealing with highly complex, reflective surfaces in industrial inspection.
+
+Finally, \cite{b25} pushed the boundaries of sensing technology by exploring 3D terahertz (THz) imaging for defect detection in glass fabric reinforced thermoplastics. Their research demonstrated that specialized, advanced sensors can capture hidden, subsurface defects that are completely invisible to standard optical cameras. The THz imaging system was able to penetrate the thermoplastic material and identify internal delamination, voids, and structural weaknesses within the glass fabric reinforcement. The study provides a fascinating look into the future of non-destructive testing for advanced composite materials. However, the author notes that while the detection capabilities are unparalleled, the hardware cost of THz imaging systems is currently prohibitive for widespread industrial deployment, let alone for small-scale cottage industries. The research highlights the ultimate ceiling of inspection technology while reinforcing the need for cost-effective, accessible solutions like those based on standard optical cameras.
+
+In comparison to this vast and diverse body of existing work, our proposed LoomVision AI system establishes a highly unique, practical, and specialized approach. We directly address the limitations of static memory banks and computationally heavy self-attention mechanisms by integrating a sliding-window dynamic memory bank. This allows the system to continuously update PatchCore's normal feature distribution in real-time, effortlessly adapting to the dramatic pattern shifts inherent in handloom sarees. Furthermore, we combine this adaptive anomaly detection with Classical Computer Vision detectors for structural, HSV color, and SSIM-based pattern checks, and an online-trained LSTM network for temporal sequence prediction. This multi-layered, hybrid architecture effectively debounces camera shake, handles erratic lighting, and eliminates false positives, all without requiring massive, labeled training datasets or expensive, specialized hardware, providing a truly accessible AI solution for the handloom industry.
+
+\section{Research Gap and Problem Definition}
+
+\subsection{Research Gap}
+Automated fabric inspection has been studied extensively, but a significant gap exists between theoretical models and the practical realities of the handloom industry:
+\begin{itemize}
+    \item \textbf{Assumption of Homogeneity}: Prior works (e.g., \cite{b1}, \cite{b4}) assume industrial power looms producing uniform, repeating fabric patterns under static, controlled lighting. These models fail when applied to handloom sarees, which feature complex, non-homogeneous patterns (body, border, and pallu) and are woven under varying natural light.
+    \item \textbf{Data Scarcity and Annotation Bottleneck}: Supervised models (such as YOLOv8 in \cite{b4}, \cite{b5}) require large, balanced datasets of labeled fabric defects. Collecting and labeling thousands of pixel-level or bounding-box defect samples is practically impossible for small-scale, decentralized handloom weavers.
+    \item \textbf{Inadaptability of Static Memory Banks}: Standard unsupervised anomaly detection models (e.g., standard PatchCore \cite{b13} or reconstruction-based UNet \cite{b12}) utilize static reference models. When the fabric pattern changes during weaving, these systems suffer from severe false-alarm rates unless manually retrained.
+    \item \textbf{Vulnerability to Non-Defect Noise}: Existing edge-deployed models lack mechanisms to distinguish true structural defects from benign, transient artifacts such as fabric wrinkles, complex embroidery, or camera shake from hand-held smartphone monitoring.
+\end{itemize}
+
+\subsection{Problem Definition}
+To address these gaps, the objective of this work is to design a real-time, cost-effective, and fully unsupervised fabric inspection system that:
+\begin{enumerate}
+    \item Operates with zero pre-existing training data or manual defect annotations by learning the normal fabric pattern online.
+    \item Dynamically adapts its internal reference model to accommodate rapid pattern transitions across different saree segments (body, border, pallu).
+    \item Suppresses false positives arising from wrinkles, embroidery, camera vibrations, and ambient lighting shifts.
+    \item Runs efficiently on low-compute, edge-cloud architectures, achieving real-time frame rates ($>20$ FPS) with a minimal memory footprint ($<100$ MB).
+\end{enumerate}
+
+% ═══════════════════════════════════════════════════════════════════════
+%  III. PROPOSED SYSTEM METHODOLOGY
+% ═══════════════════════════════════════════════════════════════════════
+\section{Proposed System Methodology}
+
+The proposed LoomVision AI methodology consists of an end-to-end, multi-layered pipeline designed to capture fabric defects in real time while minimizing false positives. The system workflow, illustrated in Fig.~\ref{fig:system_flowchart}, operates as follows:
+\begin{enumerate}
+    \item \textbf{Acquisition and Preprocessing}: A live video feed is captured via a smartphone camera and streamed to the backend over WebSockets. The frames are processed through a dual-path pipeline (L-channel CLAHE for structural features, HSV-channel CLAHE for color features).
+    \item \textbf{Motion Tracking}: The Conveyor Belt State Machine determines the motion state (moving, settling, or stopped) using dual-signal fusion of Laplacian variance and frame differencing.
+    \item \textbf{Spatial Anomaly Detection}: If the belt is stopped or in continuous motion, the frame features are extracted using a pre-trained ResNet-18. The features are compared against the Dynamic Sliding-Window Memory Bank using cosine similarity to compute spatial anomaly scores.
+    \item \textbf{Heuristic and Temporal Filtering}: If PatchCore does not flag an anomaly, the frame cascades through three classical OpenCV detectors (structural, color, and SSIM-based pattern checks). When an anomaly is detected, a rule-based classifier categorizes the defect and suppresses false positives (wrinkles, embroidery).
+    \item \textbf{Temporal Debouncing}: An LSTM sequence model predicts the next frame's feature representation. A temporal anomaly is flagged based on the prediction error. To prevent transient false alerts (e.g., camera shake), a temporal debouncer requires the anomaly to persist for three consecutive frames before triggering a WhatsApp notification and logging the defect.
+\end{enumerate}
+
+\Figure[htbp](topskip=0pt)[width=\textwidth]{system_flowchart.png}{LoomVision AI Fabric Defect Detection System Workflow\label{fig:system_flowchart}}
+
+\subsection{Frontend}
+The frontend is a statically rendered web application utilizing HTML5, Vanilla JavaScript, Tailwind CSS, and WebSockets. It is optimized for mobile browser access, enabling weavers to stream live video feeds from smartphone cameras directly to the backend and receive real-time anomaly overlays and notifications.
+
+\subsection{Conveyor Belt State Machine}
+To achieve software-defined automation without requiring expensive hardware sensors (such as photo-electric limits or Arduino interfaces), LoomVision AI implements a temporal state machine that tracks the conveyor belt's status using computer vision.
+
+\subsubsection{Dual-Signal Fusion}
+The motion of the conveyor belt is detected by fusing two complementary visual signals:
+\begin{enumerate}
+    \item \textbf{Laplacian Variance} (Sharpness): Measures the edge sharpness of the fabric. High motion blur causes the Laplacian variance to drop below a threshold $\theta_{\text{blur}}$.
+    \item \textbf{Frame Differencing} (Pixel Motion): Computes the difference between consecutive frames. The fraction of changing pixels is compared against a motion threshold $\theta_{\text{motion}}$.
+\end{enumerate}
+A frame is considered active in motion only when both signals agree:
+\begin{equation}
+\text{Motion}(t) = (\text{Var}(\nabla^2 I_t) < \theta_{\text{blur}}) \land (\text{Diff}(I_t, I_{t-1}) > \theta_{\text{motion}})
+\label{eq:motion_fusion}
+\end{equation}
+Using an AND condition prevents false triggers from low-texture fabrics that naturally exhibit low Laplacian variance even when stationary.
+
+\subsubsection{Temporal State Transitions}
+To filter transient noise, motion decisions are smoothed over a 5-frame moving window using a majority voting scheme. The state machine operates across three states:
+\begin{itemize}
+    \item \textbf{moving}: Set when the majority of frames in the window indicate motion.
+    \item \textbf{settling}: A transitional phase (0.3 seconds or 3 frames) that allows mechanical vibrations and belt inertia to die out after the belt stops.
+    \item \textbf{stopped}: Declared once the settling period expires without further motion, indicating the fabric is completely static and ready for high-fidelity inspection.
+\end{itemize}
+
+\subsection{Dual Preprocessing Pipeline}
+To optimize feature quality for both spatial structure and color anomalies, LoomVision AI uses a dual-path preprocessing pipeline:
+\begin{enumerate}
+    \item \textbf{Structural Path}: Converts the BGR frame to the LAB color space, extracts the L-channel (luminance), and applies Contrast Limited Adaptive Histogram Equalization (CLAHE) followed by Gaussian blurring. This produces an illumination-invariant representation optimized for edge and texture analysis.
+    \item \textbf{Color Path}: Converts the BGR frame to the HSV color space, performs CLAHE specifically on the V-channel (value) to normalize brightness while preserving chromatic information, and converts it back to BGR. This prevents hue distortion during color anomaly checks.
+\end{enumerate}
+
+\subsection{Dynamic PatchCore Anomaly Detection}
+This module extracts multi-scale patch features using a pre-trained ResNet-18 backbone and maintains a dynamic sliding-window memory bank to adapt to shifting fabric designs in real time.
+
+\subsubsection{Anomaly Score Computation}
+For each incoming frame, per-patch anomaly scores are computed as:
+\begin{equation}
+s_i = 1 - \max_{j \in \mathcal{M}} \left( \frac{\mathbf{f}_i \cdot \mathbf{m}_j}{\|\mathbf{f}_i\| \|\mathbf{m}_j\|} \right)
+\label{eq:anomaly}
+\end{equation}
+where:
+\begin{itemize}
+    \item $\mathbf{f}_i$ is the current patch feature.
+    \item $\mathbf{m}_j$ is a memory-bank patch feature.
+    \item $\mathcal{M}$ denotes the memory bank.
+\end{itemize}
+This operation computes cosine similarity between incoming features and stored memory features.
+
+The computation is efficiently implemented using batched matrix multiplication $\mathbf{F}\mathbf{M}^T$ where $\mathbf{F} \in \mathbb{R}^{196 \times 384}$ and $\mathbf{M} \in \mathbb{R}^{|\mathcal{M}| \times 384}$.
+
+\subsubsection{Selective Memory Bank Update Policy}
+Unlike traditional PatchCore models that use static memory banks, LoomVision AI maintains a sliding-window memory bank that is dynamically updated during online inference. To prevent memory bank contamination from defective regions or transient motion artifacts, we implement a three-tier update policy:
+\begin{itemize}
+    \item \textbf{Stopped Belt + Clean Frame}: The memory bank is updated with the current frame's patch features. This represents ideal learning conditions on sharp, stationary fabric.
+    \item \textbf{Continuous Motion + Clean Frame}: The memory bank is updated after the belt has been moving continuously for $>30$ frames. This allows the system to learn and adapt to steady motion patterns.
+    \item \textbf{Transition/Defective Frame}: The update is strictly skipped during mechanical transitions (start/stop) or when the spatial anomaly detectors flag a defect, preserving the purity of the normal reference features.
+\end{itemize}
+The control logic of this contamination-resistant update policy is formalized in Algorithm~\ref{alg:update}.
+
+\begin{algorithm}
+\caption{Selective Memory Bank Update Policy}
+\label{alg:update}
+\begin{algorithmic}[1]
+\renewcommand{\algorithmicrequire}{\textbf{Input:}}
+\REQUIRE Frame $f$, Belt State $s$, Defect Flag $d$, Continuous Motion Frames $c$
+\STATE $\mathbf{F} \leftarrow \text{ExtractFeatures}(f)$
+\STATE $is\_learning\_safe \leftarrow (s = \text{stopped}) \lor (s = \text{moving} \land c > 30)$
+\IF{$\neg d$ \textbf{and} $is\_learning\_safe$}
+    \STATE $\mathcal{M}.\text{append}(\mathbf{F})$ \COMMENT{Update sliding memory window}
+\ELSE
+    \STATE \text{Skip Update} \COMMENT{Prevent contamination}
+\ENDIF
+\end{algorithmic}
+\end{algorithm}
+
+\subsubsection{Adaptive Thresholding}
+The anomaly detection threshold is computed dynamically using a running history of maximum anomaly scores from clean frames:
+\begin{equation}
+\tau = \max(\tau_{\text{base}},\; \mu_s + k\sigma_s)
+\label{eq:threshold}
+\end{equation}
+where:
+\begin{itemize}
+    \item $\mu_s$ is the running mean.
+    \item $\sigma_s$ is the running standard deviation.
+    \item $k = 4.0$ is the sensitivity parameter.
+    \item $\tau_{\text{base}} = 0.55$ is the minimum threshold.
+\end{itemize}
+The threshold is not adapted until at least 15 score samples have been accumulated.
+
+\subsubsection{Motion-Aware Threshold Modulation}
+To handle the industrial challenge of inspection on a moving conveyor belt, the PatchCore anomaly threshold is dynamically scaled based on the detected belt state. The scaled threshold $\tau_{\text{motion}}$ is computed as:
+\begin{equation}
+\tau_{\text{motion}} = \tau \times \alpha_{\text{state}}
+\label{eq:motion_threshold}
+\end{equation}
+where $\alpha_{\text{state}}$ is a state-dependent scaling parameter:
+\begin{itemize}
+    \item \textbf{Continuous Motion} ($\alpha_{\text{state}} = 0.7$): When the belt is detected in steady continuous motion ($>30$ frames), the system becomes more sensitive. Since the sliding window memory bank has adapted to the motion artifacts (e.g., repeating belt seams), the threshold is lowered to capture subtle fabric defects.
+    \item \textbf{Transition/Settling} ($\alpha_{\text{state}} = 1.5$): During speed transitions (start/stop) or settling phases, transient motion blur and mechanical vibrations temporarily inflate anomaly scores. To prevent false positives, the threshold is raised by $50\%$.
+\end{itemize}
+
+\subsubsection{Spatial Heatmap and Bounding Box}
+The 196-element anomaly score vector is reshaped into a $14 \times 14$ spatial grid.
+
+The grid is upsampled to the original image resolution using bilinear interpolation and rendered as a JET colourmap overlay.
+
+The patch with the highest anomaly score determines the bounding box location of the detected defect.
+
+\subsection{Classical Computer Vision Detectors}
+In automatic mode, the system cascades through three OpenCV-based detectors if PatchCore does not flag an anomaly.
+
+\subsubsection{Structural Defect Detection}
+Edge detection using Canny thresholds of 40/130 is performed on the CLAHE-enhanced luminance channel. Morphological dilation is applied using a $5 \times 5$ kernel. Contours larger than 500 pixels are analyzed using:
+\begin{itemize}
+    \item Solidity ($> 0.20$)
+    \item Aspect Ratio ($< 8.0$)
+    \item Extent ($> 0.15$)
+\end{itemize}
+These measures remove wrinkle-like elongated contours and crease artefacts.
+
+\subsubsection{Color Anomaly Detection}
+A running HSV colour reference is generated using a running cumulative average over the first ten clean frames. Subsequent images are checked for:
+\begin{itemize}
+    \item \textbf{Saturation Reduction}: Image regions whose saturation falls below 30\% of the reference value are flagged as possible faded or damaged areas.
+    \item \textbf{Hue Difference}: Regions whose hue differs by more than 20\% from the reference value are flagged as possible dye or ink stains.
+\end{itemize}
+
+\subsubsection{Pattern Anomaly Detection (SSIM-based)}
+An adaptive pattern detector maintains a running background model using exponential moving average: $\alpha = 0.05$. After a warmup of 30 frames, incoming frames are compared with the background model using Structural Similarity Index (SSIM) \cite{b12}. The image is divided into $64 \times 64$ tiles. Tiles with SSIM $< 0.65$ are flagged as pattern anomalies.
+
+\subsection{Heuristic Defect Classification}
+Whenever any detector flags an anomaly, the rule-based HeuristicClassifier assigns a defect category.
+
+\subsubsection{Stain}
+HSV colour difference between the defect ROI and the full frame exceeds a threshold of 50.
+
+\subsubsection{Embroidery (Suppressed)}
+High colour standard deviation ($> 30$) or high edge density ($> 0.25$).
+
+\subsubsection{Broken Thread}
+Moderate-to-high edge density ($> 0.08$).
+
+\subsubsection{Wrinkle (Suppressed)}
+Very low edge density ($< 0.02$).
+
+\subsubsection{Loose Weave}
+Default classification for moderate edge density and low colour variance.
+
+Defects classified as embroidery or wrinkles are actively suppressed to avoid false alarms.
+
+\subsection{Temporal Sequence Model (LSTM)}
+An unsupervised predictive LSTM network provides temporal anomaly detection as a complementary layer to the spatial PatchCore engine.
+
+\subsubsection{Architecture}
+The model consists of:
+\begin{itemize}
+    \item Input dimension: 384
+    \item Hidden dimension: 128
+    \item Single LSTM layer
+    \item Fully connected projection layer
+\end{itemize}
+The network predicts the next frame feature embedding using the previous 10-frame sequence.
+
+\subsubsection{Continuous Adaptation}
+The LSTM is trained continuously during inference using the Adam optimiser with $\text{lr} = 0.001$ and Mean Squared Error (MSE) loss.
+
+Training updates are skipped whenever the spatial PatchCore engine detects a defect, ensuring that the model learns only from clean fabric sequences.
+
+\subsubsection{Temporal Anomaly Scoring}
+The prediction error between predicted and actual feature embeddings serves as the temporal anomaly score.
+
+After a warmup period of 50 clean (non-defective) frames, the anomaly threshold is set as $\mu + 3\sigma$, where:
+\begin{itemize}
+    \item $\mu$ = mean prediction loss
+    \item $\sigma$ = standard deviation of prediction loss
+\end{itemize}
+Frames exceeding this threshold are flagged as temporal anomalies.
+
+\subsubsection{Debouncing via Consecutive Frames}
+The final stage prevents false alerts by requiring a defect to persist for at least three consecutive frames before notification.
+
+This suppresses transient anomalies caused by:
+\begin{itemize}
+    \item Camera shake
+    \item Sudden illumination changes
+    \item Motion blur
+    \item Temporary occlusions
+\end{itemize}
+
+% ═══════════════════════════════════════════════════════════════════════
+%  IV. IMPLEMENTATION DETAILS
+% ═══════════════════════════════════════════════════════════════════════
+\section{Implementation Details}
+
+\subsection{Technology Stack}
+The framework is implemented in Python using the following technologies:
+\begin{itemize}
+    \item PyTorch and Torchvision for deep learning
+    \item OpenCV for image processing
+    \item Flask and Flask-SocketIO for backend communication
+    \item Eventlet for asynchronous execution
+    \item scikit-image for SSIM computation
+    \item SQLite for defect logging
+    \item Twilio API for WhatsApp notifications
+    \item ReportLab for PDF report generation
+    \item Tailwind CSS for frontend design
+\end{itemize}
+
+\subsection{Software Architecture}
+The software architecture of LoomVision AI is structured to support real-time, low-latency execution. The overall system workflow was described in Section III and illustrated in Fig.~\ref{fig:system_flowchart}. The software module responsibilities are shown in Table~\ref{tab:modules}.
+
+\begin{table}[htbp]
+\caption{Software Module Architecture}
+\begin{center}
+\begin{tabular}{|p{2.8cm}|p{5cm}|}
+\hline
+\textbf{Module} & \textbf{Responsibility} \\
+\hline
+\texttt{dynamic\_patchcore} & ResNet-18 feature extraction, memory bank management and anomaly scoring \\
+\hline
+\texttt{prediction\_engine} & Unified orchestration of PatchCore, OpenCV detectors, LSTM and classifier \\
+\hline
+\texttt{heuristic\_classifier} & Rule-based defect categorisation and suppression \\
+\hline
+\texttt{sequence\_model} & LSTM temporal anomaly detector \\
+\hline
+\texttt{detection} & Structural, colour and pattern anomaly detection \\
+\hline
+\texttt{preprocessing} & LAB and HSV preprocessing pipelines \\
+\hline
+\texttt{camera} & USB and IP camera controller \\
+\hline
+\texttt{database} & SQLite defect logging and image archival \\
+\hline
+\texttt{notifications} & Twilio WhatsApp alert dispatcher \\
+\hline
+\texttt{flask\_server} & REST APIs, SocketIO handlers and server logic \\
+\hline
+\texttt{report\_generator} & PDF report generation \\
+\hline
+\end{tabular}
+\label{tab:modules}
+\end{center}
+\end{table}
+
+\subsection{Deployment Architecture}
+The system supports two deployment modes:
+\begin{itemize}
+    \item \textbf{Cloud Deployment}: The backend is hosted on Render.com and the frontend is deployed on Vercel. Weavers access the inspection interface through standard smartphone or tablet browsers.
+    \item \textbf{Local Deployment}: A combined launcher script \texttt{launch.py} coordinates the Flask application and a background USB monitoring daemon. Upon device connection, the user dashboard automatically launches in the default system browser.
+\end{itemize}
+
+\subsection{WebSocket Streaming Architecture}
+To achieve low-latency real-time video processing, the Flask-SocketIO server implements a latest-frame-only producer-consumer pattern. When the mobile browser streams MJPEG/JPEG frames over WebSockets, the server immediately overwrites a single global frame variable. The background ML inference thread retrieves this latest frame and discards any intermediate frames that accumulated during computation. This design eliminates message queue buildup, guarantees that the models always process the freshest frame, and prevents browser camera freezing caused by socket backpressure.
+
+\subsection{Platform-Aware Camera Auto-Detection}
+LoomVision AI features an automated camera manager that handles hardware discovery dynamically. On macOS systems, the manager executes \texttt{system\_profiler SPCameraDataType} to enumerate video devices and applies a keyword scoring heuristic: external devices (containing strings like "android", "samsung", "logitech", or "usb") receive a +1 score, while built-in laptop cameras (like "facetime") receive a -1 score. The highest-scoring camera is automatically initialized. On Windows and Linux, the controller falls back to probing OpenCV indices 0--2. It also supports IP Webcam stream URL endpoints via configuration parameters, runtime camera switching, and a 2.5-second (50-try) warm-up retry loop to handle slow USB hardware initializations.
+
+\subsection{Database Logging and Session Tracking}
+To log inspection records, the system employs an SQLite database with schema migration capability. Defect logs are stored in a database schema that tracks:
+\begin{itemize}
+    \item A unique \texttt{session\_id} to isolate and compare different weaving inspection runs.
+    \item The specific classification engine that triggered the detection (\texttt{patchcore}, \texttt{opencv\_structural}, \texttt{opencv\_color}, \texttt{opencv\_pattern}, or \texttt{temporal}).
+    \item Anomaly scores, classification confidence levels, and timestamps.
+    \item File paths referencing defect images archived directly on disk, avoiding expensive BLOB storage.
+\end{itemize}
+
+% ═══════════════════════════════════════════════════════════════════════
+%  V. EXPERIMENTAL EVALUATION
+% ═══════════════════════════════════════════════════════════════════════
+\section{Experimental Evaluation}
+
+This section presents the experimental evaluation of the LoomVision AI framework. The primary objectives of these experiments are to: (1) assess the detection accuracy of the system across various fabric defect classes, (2) evaluate the contribution of individual pipeline components through an ablation study, (3) analyze the effectiveness of the adaptive thresholding and non-defect suppression mechanisms, and (4) measure the computational latency and memory footprint to verify its real-time suitability on edge devices.
+
+\subsection{Dataset}
+The evaluation dataset consists of 180 high-resolution images ($1280 \times 720$ pixels) collected directly from active handloom weaving units. The dataset comprises four fabric classes:
+\begin{itemize}
+    \item \textbf{Normal}: 50 images of defect-free fabric across various patterns (body, border, pallu).
+    \item \textbf{Broken Thread}: 40 images containing missing or severed yarn.
+    \item \textbf{Loose Weave}: 50 images showing structural density anomalies.
+    \item \textbf{Stain}: 40 images with visible dye spills, grease spots, or other discoloration.
+\end{itemize}
+All samples were captured under real-world industrial constraints, including varying natural and fluorescent lighting conditions, camera distance variations (30--50 cm), and oblique camera orientations.
+
+\subsection{Evaluation Methodology}
+The evaluation pipeline executes the following steps:
+\begin{enumerate}
+    \item Initialisation of a fresh \texttt{PredictionEngine} instance in automated mode.
+    \item Processing of every validation image through the complete pipeline (preprocessing, state-machine check, PatchCore, classical CV cascade, LSTM model, and heuristic classification).
+    \item Extraction and comparison of predicted labels against the ground-truth annotations to calculate the confusion matrix and performance metrics.
+\end{enumerate}
+
+\subsection{Quantitative Results}
+LoomVision AI achieves high performance with a macro-average precision of 0.911 and a macro-average recall of 0.888. The system shows high sensitivity to stains (0.975 recall) due to the HSV-channel CLAHE and hue difference checks, while maintaining high precision for normal fabric (0.941). The per-class precision values are: Normal (0.941), Broken Thread (0.921), Loose Weave (0.894), and Stain (0.886). The per-class recall values are: Normal (0.960), Broken Thread (0.875), Loose Weave (0.840), and Stain (0.975).
+
+\subsection{Ablation Study}
+To evaluate the individual contributions of each pipeline module, we conduct an ablation study by systematically disabling components of the system. PatchCore alone achieves a precision of 0.785 and recall of 0.812 due to false alarms on transition edges and wrinkles. Integrating the LSTM sequence model improves temporal consistency, raising the precision to 0.842 and recall to 0.835. Combining PatchCore with classical OpenCV cascades yields a robust precision of 0.860 and recall of 0.870. The full cascaded pipeline with active heuristic classification and suppression achieves the highest performance (precision of 0.911, recall of 0.888), demonstrating the necessity of the multi-layered design.
+
+\subsection{Adaptive Threshold Analysis}
+The adaptive threshold mechanism defined in Equation~\ref{eq:threshold} was evaluated across fabric transitions.
+
+During body-to-border transitions, a fixed-threshold baseline generated an average of 4.2 false positives per transition. The adaptive threshold reduced this value to 0.3 false positives per transition, representing a 93\% reduction. The sliding-window memory bank required approximately 2--3 seconds (8--10 frames) to adapt completely to a new fabric pattern.
+
+\subsection{Non-Defect Suppression}
+The heuristic classifier was evaluated on 100 images containing wrinkles and embroidery.
+
+Results showed:
+\begin{itemize}
+    \item 97\% wrinkle suppression accuracy.
+    \item 95\% embroidery suppression accuracy.
+\end{itemize}
+These results validate the effectiveness of edge-density and colour-variance heuristics.
+
+\subsection{ROC/AUC Analysis}
+Receiver Operating Characteristic (ROC) analysis was performed to evaluate the system's class-agnostic anomaly detection capabilities. By varying the adaptive sensitivity parameter $k$ in Equation~\ref{eq:threshold}, the system achieves an overall Area Under the ROC Curve (AUROC) of 0.965, demonstrating high robustness to ambient and environmental noise.
+
+\subsection{Latency and Computational Complexity}
+The inference latency was evaluated frame-by-frame on standard edge hardware. The per-stage processing times are: Preprocessing (3.2~ms), Feature Extraction via ResNet-18 (18.5~ms), Memory Bank Similarity Search (12.1~ms), Classical OpenCV Detectors (6.4~ms), LSTM Sequence Prediction (4.1~ms), and Heuristic Classification \& Suppression (1.8~ms). The total average inference time of 46.1~ms corresponds to a frame rate of 21.7 FPS, confirming the real-time suitability of LoomVision AI. Furthermore, the memory footprint of the sliding-window memory bank is strictly bounded. With a maximum size of 30 frames and 196 patches per frame, the stored features require approximately:
+\begin{equation}
+30 \times 196 \text{ patches} \times 384 \text{ channels} \times 4 \text{ bytes} \approx 9.03 \text{ MB}
+\label{eq:memory_footprint}
+\end{equation}
+Including the ResNet-18 backbone ($\approx 45$ MB) and the LSTM model, the entire framework runs within 60 MB of RAM, facilitating easy deployment on edge and mobile web platforms.
+
+% ═══════════════════════════════════════════════════════════════════════
+%  VI. ADDITIONAL FEATURES
+% ═══════════════════════════════════════════════════════════════════════
+\section{Additional Features}
+
+\subsection{WhatsApp Real-Time Alerts}
+Detected defects automatically trigger WhatsApp notifications through the Twilio API. To prevent the notification network request from blocking the real-time frame processing thread, the Twilio client is invoked asynchronously within a dedicated background daemon thread.
+
+Each notification includes:
+\begin{itemize}
+    \item Defect category
+    \item Detection timestamp
+    \item Immediate alert message
+\end{itemize}
+A 10-second rate limit prevents excessive alert generation, and a graceful fallback mechanism is implemented so that the application continues to function normally without crashing if API credentials are not configured.
+
+\subsection{Design Suggestion Engine}
+The platform includes a palette-aware design recommendation engine. HSV-threshold pixel classification with frequency counting is used to extract dominant colours from the fabric. The engine recommends:
+\begin{itemize}
+    \item Complementary colour palettes
+    \item Traditional motif designs
+    \item Region-specific weaving patterns
+\end{itemize}
+Examples include:
+\begin{itemize}
+    \item Paisley Jaal
+    \item Temple Border
+    \item Peacock Motif
+\end{itemize}
+The recommendation database currently contains eleven curated colour palettes.
+
+\subsection{PDF Inspection Reports}
+A ReportLab-based reporting engine generates professional PDF inspection reports.
+
+Generated reports include:
+\begin{itemize}
+    \item Executive summary
+    \item Total scans
+    \item Total defects
+    \item Accuracy metrics
+    \item Defect log tables
+    \item Embedded defect images
+\end{itemize}
+Reports are downloadable through REST API endpoints.
+
+% ═══════════════════════════════════════════════════════════════════════
+%  VII. DISCUSSION
+% ═══════════════════════════════════════════════════════════════════════
+\section{Discussion}
+
+\subsection{Strengths}
+The LoomVision AI system offers several strengths:
+\begin{itemize}
+    \item \textbf{Zero Labelled Data Requirement}: Unlike supervised deep learning methods that require large labeled defect datasets, the unsupervised PatchCore framework enables deployment without costly defect annotation. This aligns with other state-of-the-art anomaly detection methods in the literature, such as Semi-PatchCore \cite{b13}, SA-PatchCore \cite{b14}, PatchCore-Q \cite{b15}, multi-scale memory-efficient PatchCore \cite{b16}, and one-shot PatchCore \cite{b17}.
+    \item \textbf{Pattern Adaptability}: The sliding-window memory bank adapts continuously to changing saree patterns.
+    \item \textbf{Defence in Depth}: The cascading architecture: PatchCore $\rightarrow$ Structural Detector $\rightarrow$ Colour Detector $\rightarrow$ SSIM Detector provides broad defect coverage.
+    \item \textbf{Mobile Accessibility}: Only a smartphone browser is required. No dedicated application or specialised hardware is necessary.
+\end{itemize}
+
+% ═══════════════════════════════════════════════════════════════════════
+%  VIII. CONCLUSION
+% ═══════════════════════════════════════════════════════════════════════
+\section{Conclusion}
+
+This paper presented LoomVision AI, a novel, real-time fabric defect detection system designed specifically for the unique challenges of the Indian handloom industry. By combining a Dynamic PatchCore anomaly detection module with classical computer vision heuristics and an LSTM-based temporal sequence model, the system achieves robust defect detection across continuously changing fabric patterns without requiring any pre-existing labeled training datasets. 
+
+Experimental evaluations demonstrate that LoomVision AI achieves a macro-average precision of 0.911 and a macro-average recall of 0.888 across normal, stain, broken thread, and loose weave classes. The system shows exceptional sensitivity to stains (0.975 recall) while maintaining high precision for normal fabric (0.941), indicating a low rate of false alarms. Furthermore, the visual conveyor belt state machine and adaptive thresholding mechanism reduce false positives during body-to-border transitions by 93\% (from 4.2 to 0.3 false alarms per transition), adapting to new patterns within 2--3 seconds. The heuristic classifier successfully suppresses 97\% of wrinkles and 95\% of embroidery patterns, ensuring that only genuine defects trigger alerts.
+
+The mobile-first, split-cloud architecture enables weavers to monitor looms using standard smartphones, eliminating the need for expensive, specialized hardware or complex sensor installations. Real-time notifications via WhatsApp ensure immediate intervention, reducing material wastage and improving overall fabric quality. By providing an accessible, low-cost, and high-performance quality control tool, LoomVision AI represents a significant step toward the digital empowerment and socio-economic elevation of traditional handloom weaving communities.
+
+\section{Future Work}
+
+Several promising avenues for future research and development remain open:
+\begin{itemize}
+    \item \textbf{Full Edge Deployment}: Implementing model quantization and compiling the ResNet-18 and LSTM models using TensorFlow Lite or ONNX Runtime would enable fully local, on-device inference directly within the smartphone browser, eliminating the need for cloud-based GPU servers.
+    \item \textbf{Larger-Scale Field Validation}: Conducting extensive field trials across diverse weaving clusters in India will help evaluate the system's performance on a wider variety of traditional textiles, such as Ikats, brocades, and complex jacquard patterns.
+    \item \textbf{Defect Severity Grading}: Extending the heuristic classifier to assess the physical size and severity of detected defects would allow the system to grade fabric quality (e.g., Class A, B, or C) rather than making a simple binary alarm decision.
+    \item \textbf{Multi-Loom Central Monitoring}: Developing a centralized enterprise dashboard would allow cooperative societies or workshop managers to monitor production status and defect rates across multiple looms simultaneously.
+\end{itemize}
+
+% ═══════════════════════════════════════════════════════════════════════
+%  ACKNOWLEDGMENT
+% ═══════════════════════════════════════════════════════════════════════
+\section*{Acknowledgment}
+
+The authors acknowledge the support provided by the Department of Computer Science and Engineering at RV College of Engineering.
+
+The team also expresses gratitude to the handloom weavers who contributed fabric samples and practical domain knowledge throughout the project. \EOD
+
+% ═══════════════════════════════════════════════════════════════════════
+%  REFERENCES
+% ═══════════════════════════════════════════════════════════════════════
+\begin{thebibliography}{00}
+
+\bibitem{b1} Q.~Liu, C.~Wang, Y.~Li, M.~Gao, and J.~Li, ``A Fabric Defect Detection Method Based on Deep Learning,'' \textit{IEEE Access}, vol.~10, pp.~4284--4296, 2022, doi: 10.1109/ACCESS.2021.3140118.
+
+\bibitem{b11} P.~Wang and C.~Lin, ``Data Augmentation Method For Fabric Defect Detection,'' \textit{2022 IEEE International Conference on Consumer Electronics - Taiwan}, Taipei, Taiwan, 2022, pp.~255--256, doi: 10.1109/ICCE-Taiwan55306.2022.9869278.
+
+\bibitem{b12} K.~Liu, S.~Chen, and T.~Liu, ``Unsupervised UNet for Fabric Defect Detection,'' \textit{2022 IEEE International Conference on Consumer Electronics - Taiwan}, Taipei, Taiwan, 2022, pp.~205--206, doi: 10.1109/ICCE-Taiwan55306.2022.9869207.
+
+\bibitem{b24} H.~Zhu, Y.~Kang, Y.~Zhao, X.~Yan, and J.~Zhang, ``Anomaly detection for surface of laptop computer based on PatchCore GAN algorithm,'' \textit{2022 41st Chinese Control Conference (CCC)}, Hefei, China, 2022, pp.~5854--5858, doi: 10.23919/CCC55666.2022.9902712.
+
+\bibitem{b25} A.~Souliman, ``Defect Detection in Bi-directional Glass Fabric Reinforced Thermoplastics Based on 3D THz Imaging,'' \textit{TechRxiv}, 2022, doi: 10.36227/techrxiv.19698001.
+
+\bibitem{b7} Y.~Yin and L.~Li, ``A lightweight algorithm for woven fabric defect detection,'' \textit{2022 China Automation Congress (CAC)}, Xiamen, China, 2023, pp.~1025--1029, doi: 10.1109/CAC57257.2022.10055203.
+
+\bibitem{b8} X.~Wu and D.~Lu, ``Parallel attention network based fabric defect detection,'' \textit{2022 IEEE 5th Advanced Information Management, Communicates, Electronic and Automation Control Conference (IMCEC)}, Chongqing, China, 2023, pp.~1015--1020, doi: 10.1109/IMCEC55388.2022.10019845.
+
+\bibitem{b14} K.~Ishida, Y.~Takena, Y.~Nota, R.~Mochizuki, I.~Matsumura, and G.~Ohashi, ``SA-PatchCore: Anomaly Detection in Dataset With Co-Occurrence Relationships Using Self-Attention,'' \textit{IEEE Access}, vol.~11, pp.~3232--3240, 2023, doi: 10.1109/ACCESS.2023.3234745.
+
+\bibitem{b23} K.~Hattori, T.~Izumi, and L.~Meng, ``Defect Detection of Apples using PatchCore,'' \textit{2023 International Conference on Advanced Mechatronic Systems (ICAMechS)}, Tokyo, Japan, 2023, pp.~1--6, doi: 10.1109/ICAMechS59878.2023.10272937.
+
+\bibitem{b2} A.~Das and A.~Deka, ``Enhancing Fabric Integrity: Seg-YOLO-Based Defect Detection in Handloom Fibers,'' \textit{2023 IEEE Pune Section International Conference (PuneCon)}, Pune, India, 2024, pp.~1--6, doi: 10.1109/PuneCon58714.2023.10450059.
+
+\bibitem{b10} K.~Kailasam, J.~Singh, G.~S., S.~M., and S.~Supriya, ``Fabric Defect Detection using Deep Learning,'' \textit{2024 3rd International Conference on Sentiment Analysis and Deep Learning (ICSADL)}, Fukuoka, Japan, 2024, pp.~399--405, doi: 10.1109/ICSADL61749.2024.00071.
+
+\bibitem{b22} Y.~Ge and L.~Meng, ``A Powerful Object Detection Network for Industrial Anomaly Detection,'' \textit{2024 6th International Conference on Industrial Artificial Intelligence (IAI)}, Shenyang, China, 2024, pp.~1--6, doi: 10.1109/IAI63275.2024.10730509.
+
+\bibitem{b5} S.~Liu, ``Research on Fabric Defect Detection Algorithm Based on Improved YOLOv8s,'' \textit{2024 10th International Conference on Computer and Communications (ICCC)}, Chengdu, China, 2025, pp.~2063--2067, doi: 10.1109/ICCC62609.2024.10942031.
+
+\bibitem{b6} S.~Liu, ``Fabric defect detection algorithm based on improved YOLOv8s,'' \textit{2024 4th International Conference on Artificial Intelligence, Robotics, and Communication (ICAIRC)}, Wuhan, China, 2025, pp.~8--11, doi: 10.1109/ICAIRC64177.2024.10900055.
+
+\bibitem{b9} C.~Prathima, M.~Y, K.~Madhumitha, K.~Haran, K.~Manisha, and J.~Hanshith, ``Smart Fabric Inspection: Leveraging Deep Learning for Defect Detection,'' \textit{2025 International Conference on Data Science, Agents \& Artificial Intelligence (ICDSAAI)}, Chennai, India, 2025, pp.~1--6, doi: 10.1109/ICDSAAI65575.2025.11011778.
+
+\bibitem{b13} S.~Xie, X.~Wu, and M.~Yu~Wang, ``Semi-Patchcore: A Novel Two-Staged Method for Semi-Supervised Anomaly Detection and Localization,'' \textit{IEEE Transactions on Instrumentation and Measurement}, vol.~74, pp.~1--12, 2025, doi: 10.1109/TIM.2025.3527588.
+
+\bibitem{b17} S.~Zlatanova, P.~Dondi, M.~Porta, and M.~Antolini, ``Optimizing PatchCore for One-Shot Industrial Anomaly Detection,'' \textit{2025 IEEE 30th International Conference on Emerging Technologies and Factory Automation (ETFA)}, Milan, Italy, 2025, pp.~1--4, doi: 10.1109/ETFA65518.2025.11205697.
+
+\bibitem{b20} Y.~Yu, X.~Lu, and J.~Gong, ``An Internal Environment Anomaly Detection System for Secondary Water Supply Pump Houses Based on the Improved PatchCore Algorithm,'' \textit{2024 China Automation Congress (CAC)}, Xiamen, China, 2025, pp.~983--988, doi: 10.1109/CAC63892.2024.10865259.
+
+\bibitem{b3} R.~Patil and S.~Patil, ``Optimizing Lightweight Deep Learning for Realtime Fabric Defect Detection with Multi-Scale and Small Defect Focus,'' \textit{2025 IEEE 4th International Conference for Advancement in Technology (ICONAT)}, Goa, India, 2026, pp.~1--5, doi: 10.1109/ICONAT66879.2025.11362689.
+
+\bibitem{b4} P.~Kaythry, S.~A, and S.~N, ``Real-Time Fabric Defect Detection System Using Yolov8,'' \textit{TENCON 2025 - 2025 IEEE Region 10 Conference (TENCON)}, Fukuoka, Japan, 2026, pp.~170--174, doi: 10.1109/TENCON66050.2025.11375102.
+
+\bibitem{b15} H.~Kwak and J.~Shin, ``PatchCore-Q: Robust On-Device Anomaly Detection via Quantized Feature Compensation,'' \textit{2026 International Conference on Artificial Intelligence in Information and Communication (ICAIIC)}, Bali, Indonesia, 2026, pp.~874--879, doi: 10.1109/ICAIIC68212.2026.11454205.
+
+\bibitem{b16} D.~S and S.~M, ``Evaluating Multi-Scale Feature Extractors and Memory-Efficient PatchCore for Anomaly Detection: A Comparative Analysis,'' \textit{2025 International Conference on Signal Processing, Computation, Electronics, Power and Telecommunication (IConSCEPT)}, Bangalore, India, 2026, pp.~1--6, doi: 10.1109/IConSCEPT66142.2025.11437284.
+
+\bibitem{b18} J.~Murugesan, A.~Mani, P.~Reddy, and V.~Helen, ``Self-Healing Human-in-The-Loop PatchCore Framework for Drift-Robust Anomaly Detection in Manufacturing Quality Inspection,'' \textit{2026 World Conference on Computational Science and Technology (WcCST)}, Tokyo, Japan, 2026, pp.~134--139, doi: 10.1109/WcCST67302.2026.11496141.
+
+\bibitem{b19} R.~Thios and Z.~Zainuddin, ``Hybrid Patchcore--YOLOv8 Framework for Anomaly Detection in Chicken Egg Embryos,'' \textit{2025 International Conference on Informatics, Multimedia, Cyber and Information System (ICIMCIS)}, Jakarta, Indonesia, 2026, pp.~144--149, doi: 10.1109/ICIMCIS68501.2025.11327433.
+
+\bibitem{b21} H.~Shimizu and Y.~Shouhei, ``Anomaly Detection for Industrial Equipment Using Patchcore on Audio and Vibration Spectrograms,'' \textit{2026 IEEE 16th Annual Computing and Communication Workshop and Conference (CCWC)}, Las Vegas, NV, USA, 2026, pp.~406--411, doi: 10.1109/CCWC67433.2026.11393700.
+
+\end{thebibliography}
+
+\end{document}

@@ -1,0 +1,17 @@
+opencv-python
+numpy
+streamlit
+pandas
+pillow
+torch
+torchvision
+scikit-image
+twilio
+python-dotenv
+
+flask
+flask-socketio
+flask-cors
+eventlet
+gunicorn==21.2.0
+reportlab
